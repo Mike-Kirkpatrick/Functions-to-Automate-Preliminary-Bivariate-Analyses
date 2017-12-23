@@ -1,0 +1,204 @@
+---
+title: "Functions to Automate Preliminary Bivariate Analyses"
+author: "Mike Kirkpatrick"
+date: "December 22, 2017"
+output: html_document
+---
+
+## Overview
+This code is designed to expedite the preliminary bivariate comparisons that are usually done prior to statistical modeling.  
+
+For example, if you are going to run a multiple regression model, you likely will test each independent variable against your dependent variable to see if there is a statisticaly significant relationship.  Additionally, you will probably create a plot visualizing the statistically significant relationships.  
+
+These exploratory analyses, although important, can become painfully monotonous.  Therefore, I wrote this code to automate this process for **continuous** and **dichotomous** dependent variables.  This file illustrates how the code could be used on the `mtcars` data set. 
+
+## Data Preparation
+First I simply import and then view the [mtcars](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/mtcars.html) dataset.  
+
+```{r Import Data}
+data(mtcars)
+head(mtcars)
+```
+
+Then I create an analysis data set (`df`).  I change `cyc` to a categorical factor variable.  I recode the variables `am` and `vs` and make them categorical factor variables.
+```{r}
+df <- mtcars
+
+df$cyl <- as.factor(df$cyl)
+
+df$am <- as.factor(
+  sapply(df$am, function(i)
+  if (i == 0) {"automatic"}
+  else if (i==1) {"manual"}
+))
+
+df$vs <- as.factor(
+  sapply(df$vs, function(i)
+    if (i == 0) {"V-engine"}
+    else if (i==1) {"Straigt engine"}
+  ))
+
+head(df)
+
+```
+
+## Set Default Parameters
+I used only base R packages except for the `car` package, which is needed to get the ANOVA p-values for dichotomous DVs. I chose to set my `alpha` level to 0.05 for determining statistical significance.  The value I choose for `alpha` here doesn't affect the actual statistical tests.  Rather, it simply changes the label the IV is given in the summary table (more on that later).  The `yrange` function makes the y-axis of charts 25% bigger and `color` simply defines two colors to be used in boxplots and barplots. 
+```{r warning=FALSE}
+library(car)
+alpha <- 0.05
+yrange <- function(y) c(0,max(y)*1.25)
+color <- c("coral","aquamarine3")
+```
+
+# Continuous Dependent Variable
+The following sections are to be used if your dependent variable is **continuous**.
+
+### Table of Statistical Tests
+I choose `mpg` as my dependent variable (`DV`).  I then create a list of all other variables in my data set and considers them as the independent variables (`IVs`).
+```{r}
+DV <- "mpg"
+IVs <- colnames(df)[colnames(df)!= DV]
+```
+
+I then define a function that will do the following to each DV and IV pair:
+
+1. Create a **linear** regression model such that DV ~ IV
+2. Create an ANOVA table
+3. Create a summary table
+4. Extract the degrees of freedom, F-statistic, p-value, r-squared, and put all of these elements into a data frame (table) called "r"
+5. Add the name of the DV and IV to the table
+6. Determine if the IV is statistically significant based on the `alpha` level I chose previsouly.  Add this label to the table
+7. Reset the `rownames`
+```{r}
+f.ConDV <- function(IV) {
+  m <- lm (df[,DV] ~ df[,IV])
+  a <- anova(m)
+  s <- summary(m)
+  r <- data.frame(cbind(df1=s$fstatistic[2], df2=s$fstatistic[3], F.stat=round(s$fstatistic[1],2), p.value=round(a$`Pr(>F)`[1],3), r.sqr = round(s$r.squared,2)))
+  r <- cbind(DV,IV,r)
+  r$Sig <- ifelse(r$p.value < alpha,'Yes','No')
+  rownames(r) <- NULL
+  return(r)
+}
+```
+
+Now, I apply my function to my data (line 1).  I order my table of statistical tests by the p-value and F-statistic.  I reset the rownames to preserve this order and then I display the results. 
+
+NOTE: This table contains the results of 10 *separate* linear regression models.  This table does NOT contain an ANOVA table for a linear regression model that includes all 10 of these IVs.  
+
+The results indicate that all of the IVs are statistically significant predictors of `MPG`.  The IV `wt` has the strongest relationship with `mpg`, and `qsec` has the weakest. 
+```{r}
+tbl.ConDV <- do.call(rbind,lapply(IVs, f.ConDV))
+tbl.ConDV <- tbl.ConDV[order(tbl.ConDV$p.value,-tbl.ConDV$F.stat),]
+rownames(tbl.ConDV) <- NULL
+print(tbl.ConDV)
+```
+
+### Plots of Statistically Significant IVs
+Now that I know which IVs are significant predictors of my DV, I want to visualize each bivariate relationship.  To do this, I make sure my DV is still defined.  Then I get a list of my statistically significant IVs.
+```{r}
+DV <- "mpg"
+IVs <- as.matrix(subset(tbl.ConDV,Sig=="Yes",select = IV))
+```
+
+I then define a function that will do the following to each DV and IV pair:
+
+1. Determine if the IV is continuous ("numeric") or categorical ("factor")
+2. If the IV is continuous, create a scatterplot
+3. If the IV is categorical, create a boxplot
+```{r}
+
+f.ConDvPlots <- function(IV) {
+  if(class(df[,IV])=="numeric") {
+    plot(df[,IV],df[,DV], main=paste("Scatterplot of",DV,"by",IV), xlab=IV, ylab=DV, pch=20)
+    abline(lm(df[,DV]~df[,IV]), col="red")
+    lines(lowess(df[,IV],df[,DV]), col="blue")
+  }
+  else if (class(df[,IV])=="factor") {
+    boxplot(df[,DV] ~ df[,IV], col = color, main=paste("Boxplot of",DV,"by",IV), ylab=DV, xlab=IV)  
+    }
+}
+```
+
+I execute the function by simply running the following.
+```{r results='hide'}
+lapply(IVs, f.ConDvPlots)
+```
+
+# Dichotomous Categorical Dependent Variable
+The following sections are to be used if your dependent variable is **dichotomous**.
+
+### Table of Statistical Tests
+I choose `vs` as my dependent variable (`DV`).  I then create a list of all other variables in my data set and considers them as the independent variables (`IVs`).
+```{r}
+DV <- "vs"
+IVs <- colnames(df)[colnames(df)!= DV]
+```
+
+I then define a function that will do the following to each DV and IV pair:
+
+1. Create a **logistic** regression model such that DV ~ IV
+2. Create an ANOVA table
+3. Extract the degrees of freedom, ChiSquare statistic, p-value, and put all of these elements into a data frame (table) called "r"
+4. Add the name of the DV and IV to the table
+5. Determine if the IV is statistically significant based on the `alpha` level I chose previsouly.  Add this label to the table
+6. Reset the `rownames`
+```{r}
+f.CatDV <- function(IV) {
+  m <- glm(df[,DV] ~ df[,IV], family = binomial)
+  a <- Anova(m, type="III")
+  r <- data.frame(cbind(df=a$Df, ChiSq=round(a$`LR Chisq`,2), p.value=round(a$`Pr(>Chisq)`,3)))
+  r <- cbind(DV,IV,r)
+  r$Sig <- ifelse(r$p.value < alpha,'Yes','No')
+  rownames(r) <- NULL
+  return(r)
+}
+```
+
+Now, I apply my function to my data (line 1).  I order my table of statistical tests by the p-value and ChiSquare statistic.  I reset the rownames to preserve this order and then I display the results. 
+
+NOTE: This table contains the results of 10 *separate* logistic regression models.  This table does NOT contain an ANOVA table for a logistic regression model that includes all 10 of these IVs.  
+
+The results indicate that all of the IVs except for `gear` and `am` are statistically significant predictors of `vs`.  The IV `qsec` has the strongest relationship with `vs`, and `am` has the weakest. 
+```{r}
+tbl.CatDV <- do.call(rbind,lapply(IVs, f.CatDV))
+tbl.CatDV <- tbl.CatDV[order(tbl.CatDV$p.value,-tbl.CatDV$ChiSq),]
+rownames(tbl.CatDV) <- NULL
+print(tbl.CatDV)
+```
+
+### Plots of Statistically Significant IVs
+Now that I know which IVs are significant predictors of my DV, I want to visualize each bivariate relationship.  To do this, I make sure my DV is still defined.  Then I get a list of my statistically significant IVs.
+```{r}
+DV <- "vs"
+IVs <- as.matrix(subset(tbl.CatDV,Sig=="Yes",select = IV))
+```
+
+I then define a function that will do the following to each DV and IV pair:
+
+1. Determine if the IV is continuous ("numeric") or categorical ("factor")
+2. If the IV is continuous, create a boxplot
+3. If the IV is categorical, create a barplot and a stacked barplot
+```{r}
+f.CatDvPlots <- function(IV) {
+  if(class(df[,IV])=="numeric") {
+    boxplot(df[,IV] ~ df[,DV], col = color, main=paste("Boxplot of",DV,"by",IV), ylab=IV, xlab=DV)
+  }
+  else if (class(df[,IV])=="factor") {
+    t <- table(df[,DV],df[,IV])
+    p <- prop.table(t,2) #if want a propotion table
+    par(mfrow=c(1,2)) 
+    barplot(t, beside=T, col=color, ylim = yrange(t), main=paste("Barplots for",DV,"by",IV), ylab="Frequency", xlab=IV)
+    legend("topleft", levels(df[,DV]), pch=15, col=color, bty="n")
+    barplot(p, col=color, ylab = "Percent of Total", xlab=IV)
+    par(mfrow=c(1,1))
+  }
+}
+
+```
+
+I execute the function by simply running the following.
+```{r results='hide'}
+lapply(IVs, f.CatDvPlots)
+```
